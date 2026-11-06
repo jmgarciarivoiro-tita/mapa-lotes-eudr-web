@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa de Lotes · EUDR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.20.6/dist/leaflet-geoman.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- ===== login ===== -->
+<section id="login" hidden>
+  <form id="loginForm" class="login-card" autocomplete="on">
+    <h1>Mapa de Lotes · EUDR</h1>
+    <p class="muted">Ingresá con tu usuario.</p>
+    <label>Email<input id="lEmail" type="email" required autocomplete="username"></label>
+    <label>Contraseña<input id="lPass" type="password" required autocomplete="current-password"></label>
+    <button class="btn primary" type="submit" id="lBtn">Ingresar</button>
+    <p id="lErr" class="err" role="alert"></p>
+  </form>
+</section>
+
+<!-- ===== app ===== -->
+<div id="app" hidden>
+  <header>
+    <h1>Mapa de Lotes · EUDR</h1>
+    <span id="workerPill" class="pill off" title="Estado del worker que procesa los lotes">Worker: …</span>
+    <span class="sp"></span>
+    <label class="hbtn" title="KML, KMZ o GeoJSON">Subir KML / KMZ / GeoJSON<input type="file" id="fileIn" accept=".kml,.kmz,.geojson,.json" multiple></label>
+    <button class="hbtn ghost" id="bExport" type="button">Exportar GeoJSON</button>
+    <button class="hbtn ghost" id="bLogout" type="button" title="Cerrar sesión">Salir</button>
+  </header>
+  <main>
+    <div id="map" aria-label="Mapa de lotes"></div>
+    <aside>
+      <div class="sec">
+        <h2>Lotes</h2>
+        <div id="summary"></div>
+        <input id="filtro" class="filtro" type="search" placeholder="Buscar por lote o productor…" aria-label="Buscar lotes">
+        <div id="list"></div>
+      </div>
+      <div id="detail" hidden></div>
+    </aside>
+  </main>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h3 id="mTitle">Exportar lotes (GeoJSON)</h3>
+    <p>Un Feature por lote con productor, lugar de producción, superficie, país y semáforo. Validar el formato contra la especificación vigente de VISEC o del sistema de la UE antes de enviarlo.</p>
+    <textarea id="exportTxt" readonly spellcheck="false"></textarea>
+    <div class="mbtns"><button class="btn" id="bClose" type="button">Cerrar</button><button class="btn" id="bDownload" type="button">Descargar</button><button class="btn primary" id="bCopy" type="button">Copiar</button></div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.20.6/dist/leaflet-geoman.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

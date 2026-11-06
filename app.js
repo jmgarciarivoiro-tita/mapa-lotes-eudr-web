@@ -20,7 +20,7 @@
     amarillo: 'Revisión de un analista con imagen de alta resolución antes de habilitar la cláusula EUDR.',
     rojo: 'No habilitar la soja de este lote para contratos EUDR. Segregar en acopio y avisar al comercial.',
   };
-  const COLS = 'id,nombre,productor,origen,geojson,area_ha,estado,semaforo,motivos,bosque_2020,perdida,estado_actual,campanias,ndvi_info,version,error,eudr_at,ndvi_at,proximo_monitoreo,created_by,created_at';
+  const COLS = 'id,nombre,productor,origen,geojson,area_ha,estado,semaforo,motivos,bosque_2020,perdida,estado_actual,campanias,ndvi_info,version,error,eudr_at,ndvi_at,proximo_monitoreo,created_by,created_at,logistica';
   const MAX_IMPORT = 300;
 
   if (!CFG.supabaseUrl || !CFG.supabaseAnonKey || !window.supabase) {
@@ -30,6 +30,7 @@
   const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { db: { schema: 'eudr' } });
 
   let me = null, lotes = new Map(), selectedId = null, chart = null, map = null, group = null, channel = null;
+  let acopios = [], acopioLayer = null, rutaLayer = null;
   const layerById = new Map(), obsCache = new Map();
 
   // ---------- utilidades ----------
@@ -242,19 +243,30 @@
   setInterval(() => pintarWorker(), 30000);
 
   // ---------- panel: lista ----------
+  // lotes que pasan el filtro de texto (lote, productor o acopio mas cercano), en el orden de la lista
+  function filtrados() {
+    const q = ($('#filtro').value || '').toLowerCase().trim();
+    return [...lotes.values()].filter(l => !q || (l.nombre || '').toLowerCase().includes(q) || (l.productor || '').toLowerCase().includes(q)
+        || (cercano(l)?.nombre || '').toLowerCase().includes(q))
+      .sort((a, b) => ({ rojo: 0, amarillo: 1 }[a.semaforo] ?? 2) - ({ rojo: 0, amarillo: 1 }[b.semaforo] ?? 2) || (a.nombre || '').localeCompare(b.nombre || ''));
+  }
+  function indicadores(lista) {
+    const cnt = { verde: 0, amarillo: 0, rojo: 0, pend: 0 }; let ha = 0;
+    lista.forEach(l => { if (cnt[l.semaforo] !== undefined) cnt[l.semaforo]++; else cnt.pend++; ha += l.area_ha || 0; });
+    return { n: lista.length, ha, ...cnt };
+  }
   function renderList() {
     const arr = [...lotes.values()];
-    const cnt = { verde: 0, amarillo: 0, rojo: 0 }; let ha = 0;
-    arr.forEach(l => { if (cnt[l.semaforo] !== undefined) cnt[l.semaforo]++; ha += l.area_ha || 0; });
+    const vis = filtrados();
+    const k = indicadores(vis);
+    const q = ($('#filtro').value || '').trim();
     $('#summary').innerHTML = arr.length ? `
-      <div class="kpi"><b>${arr.length}</b><span>lotes</span></div>
-      <div class="kpi"><b>${fmt(ha, 0)}</b><span>ha</span></div>
-      <div class="kpi v"><b>${cnt.verde}</b><span>aptos</span></div>
-      <div class="kpi a"><b>${cnt.amarillo}</b><span>revisar</span></div>
-      <div class="kpi r"><b>${cnt.rojo}</b><span>no aptos</span></div>` : '';
-    const q = ($('#filtro').value || '').toLowerCase().trim();
-    const vis = arr.filter(l => !q || (l.nombre || '').toLowerCase().includes(q) || (l.productor || '').toLowerCase().includes(q))
-      .sort((a, b) => ({ rojo: 0, amarillo: 1 }[a.semaforo] ?? 2) - ({ rojo: 0, amarillo: 1 }[b.semaforo] ?? 2) || (a.nombre || '').localeCompare(b.nombre || ''));
+      <div class="kpi"><b>${k.n}</b><span>lotes</span></div>
+      <div class="kpi"><b>${fmt(k.ha, 0)}</b><span>ha</span></div>
+      <div class="kpi v"><b>${k.verde}</b><span>aptos</span></div>
+      <div class="kpi a"><b>${k.amarillo}</b><span>revisar</span></div>
+      <div class="kpi r"><b>${k.rojo}</b><span>no aptos</span></div>` : '';
+    $('#filtroInfo').textContent = arr.length && q ? `Indicadores del filtro: ${vis.length} de ${arr.length} lotes` : '';
     const list = $('#list');
     if (!arr.length) {
       list.innerHTML = `<div class="empty"><p><b>Todavía no hay lotes.</b></p><ol>
@@ -270,7 +282,7 @@
         : l.estado === 'error' ? '<span class="state err">error</span>' : '';
       return `<button class="row ${l.id === selectedId ? 'sel' : ''}" data-id="${esc(l.id)}">
         <i class="dot" style="background:${SEM[k].color}"></i>
-        <span class="rn">${esc(l.nombre)}<small>${esc(l.productor || 'Sin productor')}</small></span>
+        <span class="rn">${esc(l.nombre)}<small>${esc(l.productor || 'Sin productor')}${cercano(l) ? ` · ${esc(cercano(l).nombre.split(' - ')[0])} ${fmt(cercano(l).km_total, 0)} km` : ''}</small></span>
         ${st}<span class="rh">${fmt(l.area_ha, 0)} ha</span></button>`;
     }).join('') || '<p class="muted">Sin resultados para la búsqueda.</p>';
     list.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => select(b.dataset.id, true)));
@@ -285,6 +297,47 @@
     if (window.innerWidth < 900) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  // ---------- logistica: acopios ----------
+  function cercano(l) {
+    const g = l && l.logistica;
+    if (!g || !Array.isArray(g.acopios)) return null;
+    return g.acopios.find(a => a.id === g.mas_cercano && a.km_total != null) || null;
+  }
+  function logisticaHtml(l) {
+    const g = l.logistica;
+    if (!g) return `<h3>Distancia a acopios</h3><div class="accion"><i class="spin"></i> Calculando distancias por ruta a los acopios…</div>`;
+    const c = cercano(l);
+    const filas = (g.acopios || []).map(a => {
+      const top = a.id === g.mas_cercano;
+      const err = a.km_total == null;
+      return `<tr class="${top ? 'cerca' : ''}"><td>${esc(a.nombre)}${top ? ' <span class="tag-cerca">Más cercano</span>' : ''}<small>${esc([a.localidad, a.provincia].filter(Boolean).join(', '))}</small></td>
+        <td>${err ? '—' : fmt(a.km_total, 0) + ' km'}</td><td>${err ? '—' : fmt(a.km_asfalto, 0)}</td><td>${err ? '—' : fmt(a.km_tierra, 1)}</td>
+        <td>${err ? '<span class="muted">sin ruta</span>' : a.minutos + ' min'}</td></tr>`;
+    }).join('');
+    const eng = c && c.enganche_m > 500 ? `<p class="cap">El lote está a ${fmt(c.enganche_m / 1000, 1)} km del camino más cercano registrado en el mapa: se sumó como acceso.</p>` : '';
+    return `<h3>Distancia a acopios</h3>
+      ${c ? `<div class="cercano"><b>Acopio más cercano: ${esc(c.nombre)}</b><span>${fmt(c.km_total, 0)} km por ruta · ${fmt(c.km_asfalto, 0)} km asfalto + ${fmt(c.km_tierra, 1)} km tierra · ~${c.minutos} min</span></div>`
+        : '<div class="accion">No se pudo calcular la ruta a los acopios. Se reintenta solo.</div>'}
+      <table class="chk dist"><tr class="th"><td>Acopio</td><td>Ruta</td><td>Asfalto</td><td>Tierra</td><td>Tiempo</td></tr>${filas}</table>
+      ${eng}<p class="cap">Ruta por camino priorizando rutas asfaltadas (nacionales y provinciales), desde un punto interior del lote. ${esc(g.motor || '')} · ${fdt(g.calculado_at)}. En caminos sin dato de superficie se asume tierra en vecinales y asfalto en rutas.</p>`;
+  }
+  async function cargarAcopios() {
+    const { data, error } = await sb.from('acopios').select('id,nombre,localidad,provincia,lat,lon,activo').eq('activo', true).order('id');
+    if (error) { console.warn('acopios', error.message); return; }
+    acopios = data || [];
+    if (acopioLayer) map.removeLayer(acopioLayer);
+    acopioLayer = L.layerGroup(acopios.map(a => L.marker([a.lat, a.lon], { pmIgnore: true, interactive: true,
+      icon: L.divIcon({ className: 'acopio-ico', html: '<span>▲</span>', iconSize: [22, 22], iconAnchor: [11, 11] }) })
+      .bindTooltip(`${esc(a.nombre)} · ${esc(a.localidad || '')}`, { direction: 'top' }))).addTo(map);
+  }
+  function dibujarRuta(l) {
+    if (rutaLayer) { map.removeLayer(rutaLayer); rutaLayer = null; }
+    const c = cercano(l);
+    if (c && c.geometria && c.geometria.type === 'LineString') {
+      rutaLayer = L.geoJSON(c.geometria, { pmIgnore: true, style: { color: '#1565c0', weight: 4, opacity: 0.8, dashArray: '8 6' } }).addTo(map);
+    }
+  }
+
   // ---------- panel: detalle ----------
   async function obsDe(l) {
     if (obsCache.has(l.id)) return obsCache.get(l.id);
@@ -297,6 +350,7 @@
     const box = $('#detail');
     if (chart) { chart.destroy(); chart = null; }
     const l = lotes.get(selectedId);
+    dibujarRuta(l);
     if (!l) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
     const k = semKey(l), s = SEM[k], a = l.area_ha || 0;
@@ -331,6 +385,7 @@
         <div class="kv"><span>Geolocalización EUDR</span><b>${a > 4 ? 'Polígono requerido (&gt; 4 ha) ✓' : 'Alcanza con un punto (≤ 4 ha)'}</b></div>
       </div>
       ${eudrHtml}
+      ${logisticaHtml(l)}
       <h3>Seguimiento satelital · NDVI</h3>
       ${ndviEstado}
       ${ea ? `<div class="ndvi-meta"><span class="${ea.lote_dividido ? 'warn2' : ''}">Hoy (${esc(ea.ultima_fecha)}): ${esc(ea.texto)}</span></div>` : ''}
@@ -427,8 +482,76 @@
     a.href = URL.createObjectURL(blob); a.download = `lotes_eudr_${new Date().toISOString().slice(0, 10)}.geojson`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
   $('#bClose').addEventListener('click', () => { $('#modal').hidden = true; });
+
+  // ---------- informe (lo filtrado) ----------
+  const SEMTXT = { verde: 'Apto EUDR (preliminar)', amarillo: 'Revisar', rojo: 'No apto EUDR' };
+  function filasInforme(lista) {
+    return lista.map(l => {
+      const c = cercano(l), p = l.perdida || {}, b = l.bosque_2020 || {}, ea = l.estado_actual || {};
+      const dist = {};
+      ((l.logistica || {}).acopios || []).forEach(a => { dist[a.id] = a; });
+      return { l, c, p, b, ea, dist };
+    });
+  }
+  function abrirInforme() {
+    const lista = filtrados();
+    if (!lista.length) return toast('No hay lotes en el filtro actual.', 'warn');
+    const k = indicadores(lista), q = ($('#filtro').value || '').trim();
+    const filas = filasInforme(lista);
+    const td = v => `<td>${v}</td>`;
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Informe Mapa de Lotes EUDR</title>
+<style>body{font:12px Inter,system-ui,Arial,sans-serif;color:#1d2a22;margin:24px}h1{font-size:18px;margin:0}h2{font-size:14px;margin:20px 0 8px}
+.meta{color:#5f6f66;margin:4px 0 14px}.k{display:flex;gap:8px;margin:10px 0}.k div{border:1px solid #e3e7e1;border-radius:8px;padding:6px 12px;text-align:center}
+.k b{display:block;font-size:16px}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #e3e7e1;padding:5px 6px;text-align:left;vertical-align:top}
+th{background:#f6f7f4;font-size:11px}.n{text-align:right;white-space:nowrap}.v{color:#2e7d32;font-weight:700}.a{color:#a77b00;font-weight:700}.r{color:#c62828;font-weight:700}
+.nota{color:#5f6f66;font-size:10.5px;margin-top:14px;line-height:1.4}.bar{margin-bottom:14px}@media print{.bar{display:none}body{margin:10mm}}</style></head><body>
+<div class="bar"><button onclick="window.print()">Imprimir / Guardar como PDF</button></div>
+<h1>Mapa de Lotes · Informe EUDR y logística</h1>
+<div class="meta">Generado ${esc(new Date().toLocaleString('es-AR'))} · ${esc(me?.email || '')} · Filtro: ${q ? '“' + esc(q) + '”' : 'sin filtro (todos los lotes)'}</div>
+<div class="k"><div><b>${k.n}</b>lotes</div><div><b>${fmt(k.ha, 0)}</b>ha</div><div class="v"><b>${k.verde}</b>aptos</div><div class="a"><b>${k.amarillo}</b>revisar</div><div class="r"><b>${k.rojo}</b>no aptos</div>${k.pend ? `<div><b>${k.pend}</b>en análisis</div>` : ''}</div>
+<h2>Detalle por lote</h2>
+<table><tr><th>Lote</th><th>Productor</th><th class="n">Ha</th><th>Semáforo</th><th>Motivo principal</th><th class="n">Bosque 2020 (ha)</th><th class="n">Pérdida post-2020 (ha)</th><th>Acopio más cercano</th><th class="n">Km ruta</th><th class="n">Km asfalto / tierra</th><th>Estado actual</th></tr>
+${filas.map(({ l, c, p, b, ea }) => `<tr>${td(esc(l.nombre))}${td(esc(l.productor || '—'))}<td class="n">${fmt(l.area_ha, 1)}</td>
+<td class="${{ verde: 'v', amarillo: 'a', rojo: 'r' }[l.semaforo] || ''}">${esc(SEMTXT[l.semaforo] || (l.estado === 'error' ? 'Error' : 'En análisis'))}</td>
+${td(esc(((l.motivos || [])[0] || {}).texto || '—'))}<td class="n">${l.bosque_2020 ? fmt(b.bosque_ha, 1) : '—'}</td><td class="n">${l.perdida ? fmt(p.perdida_post2020_ha, 1) : '—'}</td>
+${td(c ? esc(c.nombre) : '—')}<td class="n">${c ? fmt(c.km_total, 0) : '—'}</td><td class="n">${c ? fmt(c.km_asfalto, 0) + ' / ' + fmt(c.km_tierra, 1) : '—'}</td>${td(esc(ea.texto || '—'))}</tr>`).join('')}
+</table>
+${acopios.length ? `<h2>Distancia por ruta a cada acopio (km)</h2><table><tr><th>Lote</th>${acopios.map(a => `<th class="n">${esc(a.nombre)}</th>`).join('')}</tr>
+${filas.map(({ l, dist, c }) => `<tr>${td(esc(l.nombre))}${acopios.map(a => { const d = dist[a.id]; return `<td class="n">${d && d.km_total != null ? (c && c.id === a.id ? '<b>' + fmt(d.km_total, 0) + '</b>' : fmt(d.km_total, 0)) : '—'}</td>`; }).join('')}</tr>`).join('')}</table>` : ''}
+<p class="nota">Semáforo EUDR preliminar: bosque al 31/12/2020 (JRC GFC2020) y pérdida de cobertura arbórea (Hansen GFC); OTBN no consultado. Distancias por camino priorizando rutas asfaltadas, calculadas con OpenStreetMap (motor local); en caminos sin dato de superficie se asume tierra en vecinales y asfalto en rutas. Este informe no constituye una certificación.</p>
+</body></html>`;
+    const w = window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })), '_blank');
+    if (!w) toast('El navegador bloqueó la ventana del informe: permití ventanas emergentes para este sitio.', 'warn');
+  }
+  function descargarCSV() {
+    const lista = filtrados();
+    if (!lista.length) return toast('No hay lotes en el filtro actual.', 'warn');
+    const num = (v, d = 1) => (v == null || v === '' ? '' : Number(v).toFixed(d).replace('.', ','));
+    const cel = v => { const t = String(v ?? ''); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const cab = ['Lote', 'Productor', 'Hectareas', 'Semaforo', 'Motivo principal', 'Bosque 2020 ha', 'Perdida post-2020 ha', 'Anios de perdida',
+      'Acopio mas cercano', 'Km ruta', 'Km asfalto', 'Km tierra', 'Minutos', ...acopios.map(a => 'Km a ' + a.nombre), 'Estado actual', 'Ultimo analisis EUDR', 'Origen'];
+    const filas = filasInforme(lista).map(({ l, c, p, b, ea, dist }) => [l.nombre, l.productor || '', num(l.area_ha), SEMTXT[l.semaforo] || l.estado,
+      ((l.motivos || [])[0] || {}).texto || '', l.bosque_2020 ? num(b.bosque_ha) : '', l.perdida ? num(p.perdida_post2020_ha) : '',
+      Object.keys(p.perdida_post2020_por_anio || {}).join(' '), c ? c.nombre : '', c ? num(c.km_total) : '', c ? num(c.km_asfalto) : '', c ? num(c.km_tierra) : '',
+      c ? c.minutos : '', ...acopios.map(a => (dist[a.id] && dist[a.id].km_total != null ? num(dist[a.id].km_total) : '')), ea.texto || '',
+      l.eudr_at ? new Date(l.eudr_at).toLocaleString('es-AR') : '', l.origen || '']);
+    const csv = '\ufeff' + [cab, ...filas].map(r => r.map(cel).join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `informe_lotes_${new Date().toISOString().slice(0, 10)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  $('#bInforme').addEventListener('click', () => {
+    const lista = filtrados();
+    if (!lista.length) return toast('No hay lotes en el filtro actual.', 'warn');
+    $('#infTitulo').textContent = `Exportar informe · ${lista.length} lote(s)${($('#filtro').value || '').trim() ? ' del filtro actual' : ''}`;
+    $('#modalInf').hidden = false;
+  });
+  $('#bInfPdf').addEventListener('click', () => { abrirInforme(); $('#modalInf').hidden = true; });
+  $('#bInfCsv').addEventListener('click', () => { descargarCSV(); $('#modalInf').hidden = true; });
+  $('#bInfClose').addEventListener('click', () => { $('#modalInf').hidden = true; });
+  $('#modalInf').addEventListener('click', e => { if (e.target.id === 'modalInf') $('#modalInf').hidden = true; });
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') $('#modal').hidden = true; });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#modal').hidden = true; $('#modalInf').hidden = true; } });
   $('#fileIn').addEventListener('change', e => { importar(Array.from(e.target.files || [])); e.target.value = ''; });
   $('#filtro').addEventListener('input', renderList);
 
@@ -437,7 +560,7 @@
     me = session.user;
     $('#login').hidden = true; $('#app').hidden = false;
     if (!map) initMap(); else map.invalidateSize();
-    await cargarTodo(); await leerWorker(); suscribir();
+    await cargarTodo(); await leerWorker(); suscribir(); cargarAcopios();
   }
   function salir() {
     me = null; if (channel) { sb.removeChannel(channel); channel = null; }

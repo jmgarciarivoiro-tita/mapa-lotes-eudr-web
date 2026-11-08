@@ -2,7 +2,8 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f5f3a">
 <title>Mapa de Lotes · EUDR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -26,25 +27,29 @@
 <!-- ===== app ===== -->
 <div id="app" hidden>
   <header>
-    <h1>Mapa de Lotes · EUDR</h1>
+    <h1>Mapa de Lotes<span class="lg"> · EUDR</span></h1>
     <span id="workerPill" class="pill off" title="Estado del worker que procesa los lotes">Worker: …</span>
     <span class="sp"></span>
-    <label class="hbtn" title="KML, KMZ o GeoJSON">Subir KML / KMZ / GeoJSON<input type="file" id="fileIn" accept=".kml,.kmz,.geojson,.json" multiple></label>
-    <button class="hbtn ghost" id="bExport" type="button">Exportar GeoJSON</button>
+    <label class="hbtn" title="Podés elegir varios archivos a la vez: KML, KMZ, GeoJSON o un ZIP con varios">Subir<span class="lg"> KML / KMZ / GeoJSON</span><input type="file" id="fileIn" accept=".kml,.kmz,.geojson,.json,.zip,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz,application/geo+json,application/zip" multiple></label>
+    <button class="hbtn ghost" id="bInforme" type="button" title="Informe de los lotes filtrados (PDF o Excel)"><span class="lg">Exportar informe</span><span class="sm">Informe</span></button>
+    <button class="hbtn ghost" id="bExport" type="button"><span class="lg">Exportar </span>GeoJSON</button>
     <button class="hbtn ghost" id="bLogout" type="button" title="Cerrar sesión">Salir</button>
   </header>
   <main>
     <div id="map" aria-label="Mapa de lotes"></div>
-    <aside>
+    <div id="resizer" role="separator" aria-orientation="vertical" aria-label="Ajustar ancho del panel" tabindex="0" title="Arrastrá para cambiar el ancho del panel (doble clic: ancho original)"></div>
+    <aside id="panel">
       <div class="sec">
         <h2>Lotes</h2>
         <div id="summary"></div>
-        <input id="filtro" class="filtro" type="search" placeholder="Buscar por lote o productor…" aria-label="Buscar lotes">
+        <input id="filtro" class="filtro" type="search" placeholder="Buscar por lote, productor o acopio…" aria-label="Buscar lotes">
+        <div id="filtroInfo" class="filtro-info"></div>
         <div id="list"></div>
       </div>
       <div id="detail" hidden></div>
     </aside>
   </main>
+  <button type="button" id="bVerMapa" class="fab" hidden>▲ Mapa</button>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -54,6 +59,18 @@
     <p>Un Feature por lote con productor, lugar de producción, superficie, país y semáforo. Validar el formato contra la especificación vigente de VISEC o del sistema de la UE antes de enviarlo.</p>
     <textarea id="exportTxt" readonly spellcheck="false"></textarea>
     <div class="mbtns"><button class="btn" id="bClose" type="button">Cerrar</button><button class="btn" id="bDownload" type="button">Descargar</button><button class="btn primary" id="bCopy" type="button">Copiar</button></div>
+  </div>
+</div>
+
+<div id="modalInf" hidden>
+  <div class="mbox mbox-s" role="dialog" aria-modal="true" aria-labelledby="infTitulo">
+    <h3 id="infTitulo">Exportar informe</h3>
+    <p>Incluye solo los lotes del filtro actual. Podés destildar los que no quieras.</p>
+    <p id="infFiltro" class="inf-filtro"></p>
+    <div class="inf-sel"><span id="infCuenta"></span><span><button type="button" class="lnk" id="infTodos">Todos</button> · <button type="button" class="lnk" id="infNinguno">Ninguno</button></span></div>
+    <div id="infLotes" class="inf-lotes"></div>
+    <label class="inf-opt"><input type="checkbox" id="infDetalle" checked> Detalle completo por lote: chequeo EUDR, distancias, curva NDVI, campañas y evidencia (una página por lote)</label>
+    <div class="mbtns"><button class="btn" id="bInfClose" type="button">Cancelar</button><button class="btn" id="bInfCsv" type="button">Excel (CSV)</button><button class="btn primary" id="bInfPdf" type="button">Informe para imprimir / PDF</button></div>
   </div>
 </div>
 
